@@ -29,6 +29,7 @@ parser.add_argument('-d', '--drop', action='store_true',
                     help='Drop only frames containing images. Overwritten by --truncate')
 parser.add_argument('-o', '--output', help='Path to output files. (Default: add `_vidrop` at end of <video>)')
 parser.add_argument('--overwrite', action='store_true', help='Overwrite the input file <video>')
+parser.add_argument('--norun', action='store_true', help='Only show commands and do not run ffmpeg')
 parser.add_argument('-l', '--log', choices=[e.name.lower() for e in list(LOG_LEVELS)], default='info',
                     help='Set logging level')
 parser.add_argument('-v', '--verbose', action='store_true', help='Alias for --log debug')
@@ -47,6 +48,7 @@ class Manager:
     overwrite: bool = False
 
     parallel: bool = False
+    norun: bool = False
 
     frames: tuple[int, int, int] = (0, -1, 1)
     truncate: bool = False
@@ -93,6 +95,7 @@ class Manager:
             truncate=bool(args.truncate),
             drop=bool(args.drop),
             overwrite=bool(args.overwrite),
+            norun=bool(args.norun),
         )
         if args.frames is not None:
             self.frames = tuple(int(a) if a.isnumeric() else b for a, b in zip(args.frames, self.frames))

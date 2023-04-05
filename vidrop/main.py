@@ -40,12 +40,16 @@ class VideoControl:
         return int(video_info['nb_frames'])
 
     @staticmethod
-    def force_stream_to_file(stream, outfile: Path, timeit: Optional[Logger] = None):
+    def force_stream_to_file(stream, outfile: Path, timeit: Optional[Logger] = None, norun=False) \
+            -> tuple[list[str], tuple[bytes, bytes]]:
         start = datetime.now()
         spec = stream.output(str(outfile), vcodec='copy', acodec='copy').overwrite_output()
-        cmd = spec.compile()
-        res = spec.run(quiet=True)
-        if timeit is not None:
+        cmd: list[str] = spec.compile()
+        if norun:
+            res = (b'', b'')
+        else:
+            res: tuple[bytes, bytes] = spec.run(quiet=True)
+        if timeit is not None and not norun:
             end = datetime.now()
             timeit.info(f'{(end - start).microseconds:,} micro sec for: "{" ".join(cmd)}"')
         return cmd, res
@@ -62,7 +66,9 @@ class VideoControl:
             tmp_path = Path(tmp.name)
             if self.mgr.veryverbose:
                 print(f'Writing to {tmp_path}')
-            self.force_stream_to_file(stream, tmp_path, self.mgr.log)
+            self.force_stream_to_file(stream, tmp_path, self.mgr.log, self.mgr.norun)
+            if self.mgr.norun:
+                return True
             if not tmp_path.exists() or tmp_path.stat().st_size < 1:
                 self.mgr.log.error(f'{stream} output failed')
                 return False
@@ -150,6 +156,8 @@ def process_video(mgr: Manager):
         mgr.log.debug(f'Working on frame: {fr_id:>5} / {num_frames}'
                       + (f' ({fr_id / num_frames * 100:>5.2f}%)' if num_frames is not None else '')
                       + f' = {processed}; {min_score} pts')
+    mgr.log.warn(f'No matching found in {mgr.video}')
+    return -1
 
 
 def main():
