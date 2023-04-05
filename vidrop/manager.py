@@ -46,6 +46,8 @@ class Manager:
     veryverbose: bool = False
     overwrite: bool = False
 
+    parallel: bool = False
+
     frames: tuple[int, int, int] = (0, -1, 1)
     truncate: bool = False
     drop: bool = False

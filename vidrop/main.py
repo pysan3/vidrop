@@ -1,7 +1,10 @@
+from logging import Logger
 from pathlib import Path
 import sys
 import shutil
 import tempfile
+from datetime import timedelta, datetime
+from typing import Iterable, Optional
 
 import cv2
 from vidrop.media import Image, VideoIter
@@ -37,8 +40,15 @@ class VideoControl:
         return int(video_info['nb_frames'])
 
     @staticmethod
-    def force_stream_to_file(stream, outfile: Path):
-        return stream.output(str(outfile), format='mp4').overwrite_output().run(quiet=True)
+    def force_stream_to_file(stream, outfile: Path, timeit: Optional[Logger] = None):
+        start = datetime.now()
+        spec = stream.output(str(outfile), vcodec='copy', acodec='copy').overwrite_output()
+        cmd = spec.compile()
+        res = spec.run(quiet=True)
+        if timeit is not None:
+            end = datetime.now()
+            timeit.info(f'{(end - start).microseconds:,} micro sec for: "{" ".join(cmd)}"')
+        return cmd, res
 
     def stream_to_output(self, stream, outfile: Path, overwrite=True):
         if outfile.exists():
@@ -52,8 +62,9 @@ class VideoControl:
             tmp_path = Path(tmp.name)
             if self.mgr.veryverbose:
                 print(f'Writing to {tmp_path}')
-            _, err = self.force_stream_to_file(stream, tmp_path)
-            if err is None:
+            self.force_stream_to_file(stream, tmp_path, self.mgr.log)
+            if not tmp_path.exists() or tmp_path.stat().st_size < 1:
+                self.mgr.log.error(f'{stream} output failed')
                 return False
             self.mgr.log.info(f'Writing stream to {tmp_path} success.')
             shutil.copy(tmp_path, outfile)
@@ -69,9 +80,6 @@ class VideoControl:
             self.mgr.log.error(f'Video length is not enough at: {to}')
             return False
         stream = ffmpeg.input(str(video), ss=0, t=to)
-        print(stream.video)
-        print(stream.audio)
-        print(stream)
         self.mgr.log.info(f'Loaded input from {video}. ss={0}, t={to}')
         return self.stream_to_output(stream, out, overwrite=True)
 
@@ -91,13 +99,18 @@ TEST_DIR = Path('./tmp')
 TEST_DIR.mkdir(exist_ok=True, parents=True)
 
 
+def get_tqdm(mgr: Manager, iter: VideoIter):
+    if mgr.parallel:
+        return iter
+    return track(iter, description=f'Processing {mgr.video}...')
+
+
 def process_video(mgr: Manager):
     v = VideoControl(mgr)
     fps = v.get_fps(mgr.video)
     num_frames = v.get_num_frames(mgr.video)
     mgr.log.info(f'{mgr.video} fps: {fps}')
-    for fr_id, fr_img in track(VideoIter(mgr.video, mgr.frames[0], mgr.frames[1], fps),
-                               description=f'Processing {mgr.video}...'):
+    for fr_id, fr_img in get_tqdm(mgr, VideoIter(mgr.video, mgr.frames[0], mgr.frames[1], fps)):
         assert Image.is_rgb(fr_img)
         fr_gray = Image.to_grayscale(fr_img)
         fr_h, fr_w = fr_gray.shape[:2]
@@ -127,15 +140,16 @@ def process_video(mgr: Manager):
                 if diff < (sample_h * sample_w * 1e-2):
                     mgr.log.warn(f'{path} hit at {fr_id} with offset {offset}')
                     if v.crop_video_at(mgr.video, mgr.output, fr_id):
-                        mgr.log.info(f'Cropped at {fr_id} to {mgr.output}. Exitting with success.')
-                        return
+                        mgr.log.info(f'Success: frame: {fr_id}, out: {mgr.output.absolute()}')
+                        return fr_id
                     break
             else:
                 continue
             break
+        processed = timedelta(seconds=fr_id // fps)
         mgr.log.debug(f'Working on frame: {fr_id:>5} / {num_frames}'
                       + (f' ({fr_id / num_frames * 100:>5.2f}%)' if num_frames is not None else '')
-                      + f' = {fr_id // fps // 60:>3}m {fr_id // fps % 60:02}s: {min_score} pts')
+                      + f' = {processed}; {min_score} pts')
 
 
 def main():
