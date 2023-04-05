@@ -1,4 +1,6 @@
 from pathlib import Path
+import ffmpeg
+from rich import print
 import cv2
 import numpy as np
 from numpy.typing import NDArray
@@ -9,16 +11,16 @@ class VideoIter:
         self.video = video_path
         assert self.check_video_isvalid(self.video), f'{self.video} not found'
         self.vidcap = cv2.VideoCapture(str(self.video))
-        self.current_frame = start - 1
-        self.check_frame = self.check_frame_func(start, stop, step)
+        self.current_frame = -1
+        self.frame_range = start, stop, step
 
-    @staticmethod
-    def check_frame_func(start: int, stop: int, step: int):
-        def check_frame(frame: int):
-            if frame < start or frame >= stop:
-                return False
-            return (frame - start) % step == 0
-        return check_frame
+    def check_valid_frame_range(self, frame: int):
+        if frame < self.frame_range[0] or self.check_frame_end(frame):
+            return False
+        return (frame - self.frame_range[0]) % self.frame_range[2] == 0
+
+    def check_frame_end(self, frame: int):
+        return (0 < self.frame_range[1] <= frame)
 
     @staticmethod
     def check_video_isvalid(p: Path):
@@ -29,20 +31,22 @@ class VideoIter:
 
     def __next__(self):
         while True:
-            self.current_frame += 1
+            if self.check_frame_end(self.current_frame):
+                raise StopIteration()
             res: tuple[bool, NDArray[np.uint8]] = self.vidcap.read()
+            self.current_frame += 1
             success, image = res
             if not success:
                 raise StopIteration()
-            if self.check_frame(self.current_frame):
-                return self.current_frame, image
+            if self.check_valid_frame_range(self.current_frame):
+                break
+        return self.current_frame, image
 
 
 class Image:
     @staticmethod
     def load(file_path: Path):
         img = cv2.imread(str(file_path), cv2.IMREAD_COLOR)
-        print(f'img={img.shape}')
         return np.array(img.tolist(), dtype=np.uint8)
 
     @staticmethod
@@ -56,21 +60,41 @@ class Image:
     @staticmethod
     def to_grayscale(img: NDArray[np.uint8]) -> NDArray[np.uint8]:
         assert Image.is_rgb(img), f'{img.shape} is wrong. Last dim should be 3'
-        return np.average(img, axis=-1)
+        img = (np.average(img, axis=-1).astype(np.uint8) // 10) * 10
+        ave = np.average(img)
+        return ((img > ave) * 255).astype(np.uint8)
 
     @staticmethod
-    def compare_grays(a: NDArray[np.uint8], b: NDArray[np.uint8], thres: int = 5):
+    def compare_grays(a: NDArray[np.uint8], b: NDArray[np.uint8]):
         assert Image.is_gray(a), f'img a: {a.shape} is wrong. should be grayscale'
         assert Image.is_gray(b), f'img b: {b.shape} is wrong. should be grayscale'
         assert a.shape == b.shape, f'a: {a.shape}, b: {b.shape} is not equal. cannot compare'
-        return np.sum(np.abs(a - b)) < thres
+        diff = np.abs(a.astype(np.int64) - b) > 5
+        # cv2.imwrite('tmp/diff.pgm', (diff * 255).astype(np.uint8))
+        return np.sum(diff, dtype=np.int64)
+
+    @staticmethod
+    def check_resizable(a: NDArray[np.uint8], b: NDArray[np.uint8]):
+        a_h, a_w = a.shape[:2]
+        b_h, b_w = b.shape[:2]
+        return a_h == b_h, a_w == b_w
 
     @staticmethod
     def resize_to_align(img: NDArray[np.uint8], wh: tuple[int, int], offset: tuple[int, int] = (0, 0)):
         offx, offy = offset
         w, h = wh
-        lenx, leny = w - offx, h - offy
         imgx, imgy = img.shape[:2]
-        assert offx < w and offy < h, f'offx: {offx} < w: {w}, offy: {offy} < h: {h}'
+        lenx, leny = imgx - offx, imgy - offy
+        assert offx < imgx and offy < imgy, f'offx: {offx} < imgx: {imgx}, offy: {offy} < imgy: {imgy}'
         assert lenx <= imgx and leny <= imgy, f'lenx: {lenx} < imgx: {imgx}, leny: {leny} < imgy: {imgy}'
-        return img[offx:w, offy:h]
+        return img[offx:offx + w, offy:offy + h]
+
+
+if __name__ == "__main__":
+    base_dir = Path('.')
+    img1 = Image.load(base_dir / 'mahjong_end.pgm')
+    img2 = Image.load(base_dir / 'tmp' / f'{990:05}_{1}.pgm')
+    print(f'is_rgb={Image.is_rgb(img1)}')
+    print(f'is_gray={Image.is_gray(img1)}')
+    print(f'check to_grayscale={Image.is_gray(Image.to_grayscale(img1))}')
+    print(f'compare_grays={Image.compare_grays(Image.to_grayscale(img1), Image.to_grayscale(img2))}')

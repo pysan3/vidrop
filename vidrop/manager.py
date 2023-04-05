@@ -12,12 +12,11 @@ from vidrop.media import Image
 
 
 class LOG_LEVELS(IntEnum):
-    DEBUG = auto()
-    TRACE = auto()
-    INFO = auto()
-    WARN = auto()
-    ERROR = auto()
-    OFF = auto()
+    DEBUG = 10
+    INFO = 20
+    WARN = 30
+    ERROR = 40
+    OFF = 0
 
 
 parser = argparse.ArgumentParser('vidrop', 'Drop Video Frames Based On Image Files')
@@ -29,6 +28,7 @@ parser.add_argument('-t', '--truncate', action='store_true',
 parser.add_argument('-d', '--drop', action='store_true',
                     help='Drop only frames containing images. Overwritten by --truncate')
 parser.add_argument('-o', '--output', help='Path to output files. (Default: add `_vidrop` at end of <video>)')
+parser.add_argument('--overwrite', action='store_true', help='Overwrite the input file <video>')
 parser.add_argument('-l', '--log', choices=[e.name.lower() for e in list(LOG_LEVELS)], default='info',
                     help='Set logging level')
 parser.add_argument('-v', '--verbose', action='store_true', help='Alias for --log debug')
@@ -44,6 +44,7 @@ class Manager:
     logger: Optional[Logger] = None
     log_level: LOG_LEVELS = LOG_LEVELS.INFO
     veryverbose: bool = False
+    overwrite: bool = False
 
     frames: tuple[int, int, int] = (0, -1, 1)
     truncate: bool = False
@@ -56,7 +57,11 @@ class Manager:
 
     @property
     def output(self):
-        o = self._output if self._output is not None else self.video.with_stem(f'{self.video.stem}_vidrop')
+        o = self.video.with_stem(f'{self.video.stem}_vidrop')
+        if self.overwrite:
+            o = self.video
+        elif self._output is not None:
+            o = self._output
         o.parent.mkdir(exist_ok=True, parents=True)
         return o
 
@@ -83,11 +88,12 @@ class Manager:
         self = cls(
             Path(args.video),
             [Path(f) for f in args.images],
-            truncate=args.truncate is True,
-            drop=args.drop is True,
+            truncate=bool(args.truncate),
+            drop=bool(args.drop),
+            overwrite=bool(args.overwrite),
         )
         if args.frames is not None:
-            self.frames = tuple(int(a) if a.isnumeic() else b for a, b in zip(args.frames, self.frames))
+            self.frames = tuple(int(a) if a.isnumeric() else b for a, b in zip(args.frames, self.frames))
         if args.output is not None:
             self._output = Path(args.output)
         if (args.log or '').upper() in dir(LOG_LEVELS):
@@ -108,83 +114,15 @@ class Manager:
         if use_rich:
             from rich.logging import RichHandler
             ch = RichHandler()
+            ch.setLevel(level)
             logger.addHandler(ch)
         else:
             from logging import StreamHandler, Formatter
             ch = StreamHandler()
+            ch.setLevel(level)
             ch.setFormatter(Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
             logger.addHandler(ch)
         return logger
 
     def print_config(self):
         self.log.info('\n'.join([f'{k}: {v}' for k, v in asdict(self).items() if not k.startswith('_')]))
-
-    def debug(self, msg, *args, **kwargs):
-        """
-        Log 'msg % args' with severity 'DEBUG'.
-
-        To pass exception information, use the keyword argument exc_info with
-        a true value, e.g.
-
-        logger.debug("Houston, we have a %s", "thorny problem", exc_info=1)
-        """
-        self.log.debug(msg, *args, **kwargs)
-
-    def info(self, msg, *args, **kwargs):
-        """
-        Log 'msg % args' with severity 'INFO'.
-
-        To pass exception information, use the keyword argument exc_info with
-        a true value, e.g.
-
-        logger.info("Houston, we have a %s", "interesting problem", exc_info=1)
-        """
-        self.log.info(msg, *args, **kwargs)
-
-    def warning(self, msg, *args, **kwargs):
-        """
-        Log 'msg % args' with severity 'WARNING'.
-
-        To pass exception information, use the keyword argument exc_info with
-        a true value, e.g.
-
-        logger.warning("Houston, we have a %s", "bit of a problem", exc_info=1)
-        """
-        self.log.warning(msg, *args, **kwargs)
-
-    def warn(self, msg, *args, **kwargs):
-        self.log.warn(msg, *args, **kwargs)
-
-    def error(self, msg, *args, **kwargs):
-        """
-        Log 'msg % args' with severity 'ERROR'.
-
-        To pass exception information, use the keyword argument exc_info with
-        a true value, e.g.
-
-        logger.error("Houston, we have a %s", "major problem", exc_info=1)
-        """
-        self.log.error(msg, *args, **kwargs)
-
-    def exception(self, msg, *args, exc_info=True, **kwargs):
-        """
-        Convenience method for logging an ERROR with exception information.
-        """
-        self.error(msg, *args, exc_info=exc_info, **kwargs)
-
-    def critical(self, msg, *args, **kwargs):
-        """
-        Log 'msg % args' with severity 'CRITICAL'.
-
-        To pass exception information, use the keyword argument exc_info with
-        a true value, e.g.
-
-        logger.critical("Houston, we have a %s", "major disaster", exc_info=1)
-        """
-        self.log.critical(msg, *args, **kwargs)
-
-    def fatal(self, msg, *args, **kwargs):
-        """
-        Don't use this method, use critical() instead.
-        """
-        self.log.fatal(msg, *args, **kwargs)
