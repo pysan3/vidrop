@@ -2,6 +2,7 @@ from pathlib import Path
 from multiprocessing import Pool, cpu_count
 import sys
 from rich import print
+from rich.progress import Progress
 from .main import process_video
 from .manager import Manager
 
@@ -28,7 +29,10 @@ def main():
         mgr.print_config()
         video_mgrs.append(mgr)
     print(f'Using {cpu_count() - 1} cpus.')
-    with Pool(processes=cpu_count() - 1) as pool:
-        results = pool.map(process_video, video_mgrs)
-    for mgr, fr_id in zip(video_mgrs, results):
-        print(f'{mgr.video}: {fr_id} -> {mgr.output}')
+    with Progress() as progress:
+        task = progress.add_task('Processing multiple files...', total=len(video_mgrs))
+        with Pool(processes=cpu_count() - 1) as pool:
+            results = pool.imap(process_video, video_mgrs)
+            for mgr, fr_id in zip(video_mgrs, results):
+                progress.advance(task)
+                print(f'{mgr.video}: {fr_id} -> {mgr.output}')
